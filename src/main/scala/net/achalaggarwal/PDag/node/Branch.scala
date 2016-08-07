@@ -26,17 +26,23 @@ case class Branch(nodes: List[Node]) extends Node {
 
   override def consume(node: ActionNode): Node = {
     if (canExecuteInParallelCompletely(node)) {
-      new ForkJoin(Set(node, this))
+      ForkJoin.get(node, this)
     } else if (canExecuteInParallelPartially(node)) {
       val components = nodes.tail.foldLeft((List.empty[Node], List(nodes.head)))(extractComponents(node))._1
 
       val slowestParallelBranch =
         components
-        .filter(_.canExecuteInParallelPartially(node))
-        .sortBy(-_.weight)
+        .zipWithIndex
+        .filter(_._1.canExecuteInParallelPartially(node))
+        .sortBy(-_._1.weight)
         .head
 
-      Branch.get(components.map(replaceNodeWith(slowestParallelBranch, slowestParallelBranch.consume(node))))
+      Branch.get(
+        components.updated(
+          index = slowestParallelBranch._2,
+          elem = slowestParallelBranch._1.consume(node)
+        )
+      )
     } else if(canExecuteInSerialFirst(node)) {
       Branch.get(node +: nodes)
     } else if(canExecuteInSerialLast(node)) {
@@ -49,25 +55,24 @@ case class Branch(nodes: List[Node]) extends Node {
           .get
           ._1
 
-      Branch.get(nodes.flatMap(n => {
-        if (n == serialExecutableNode) {
-          n.consume(node) match {
-            case Branch(innerBranchNodes) => innerBranchNodes
-            case fj@ForkJoin(_) => List(fj)
-          }
-        } else {
-          List(n)
-        }
-      }))
+      Branch.get(nodes.flatMap(
+        consumedByInnerNode(
+          nodeToConsume = node,
+          consumedByNode = serialExecutableNode
+        )
+      ))
     }
   }
 
-  def replaceNodeWith(node: Node, replacement: Node): (Node) => Node = {
+  def consumedByInnerNode(nodeToConsume: ActionNode, consumedByNode: Node): (Node) => List[Node] = {
     n => {
-      if (n == node) {
-        replacement
+      if (n == consumedByNode) {
+        n.consume(nodeToConsume) match {
+          case Branch(innerBranchNodes) => innerBranchNodes
+          case fj@ForkJoin(_) => List(fj)
+        }
       } else {
-        n
+        List(n)
       }
     }
   }
@@ -77,11 +82,19 @@ case class Branch(nodes: List[Node]) extends Node {
 
       val onGoingBranch = accumulators._2
 
-      if (
-        (!onGoingBranch.head.canExecuteInParallelPartially(node) && !n.canExecuteInParallelPartially(node)) ||
-        (onGoingBranch.head.canExecuteInParallelCompletely(node) && n.canExecuteInParallelCompletely(node)) ||
-          ((!onGoingBranch.head.canExecuteInParallelCompletely(node) && !n.canExecuteInParallelCompletely(node)) &&
-            onGoingBranch.head.canExecuteInParallelPartially(node) && n.canExecuteInParallelPartially(node))) {
+      val a = onGoingBranch.head.canExecuteInParallelCompletely(node)
+      val b = onGoingBranch.head.canExecuteInParallelPartially(node)
+
+      val c = n.canExecuteInParallelPartially(node)
+      val d = n.canExecuteInParallelCompletely(node)
+
+      val isBothLastAndCurrentSerial = !b && !c
+      val isBothLastAndCurrentCompletelyParallel = a && d
+      val isBothLastAndCurrentJustPartiallyParallel = (!a && !d) && b && c
+
+      if (isBothLastAndCurrentSerial ||
+          isBothLastAndCurrentCompletelyParallel ||
+          isBothLastAndCurrentJustPartiallyParallel) {
         if (nodes.last == n) {
           (accumulators._1 :+ Branch.get(onGoingBranch :+ n), List())
         } else {
@@ -109,5 +122,9 @@ object Branch {
     } else {
       new Branch(nodes)
     }
+  }
+
+  def get(nodes: Node*) : Node = {
+    get(nodes.toList)
   }
 }

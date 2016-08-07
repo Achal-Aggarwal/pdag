@@ -15,11 +15,9 @@ case class ActionNode(action: Action) extends Node {
 
   def consumeSerially(newActionNode: ActionNode): Node = {
     if (canExecuteInSerialFirst(newActionNode)) {
-      new Branch(List(newActionNode, this))
-    } else if(canExecuteInSerialLast(newActionNode)) {
-      new Branch(List(this, newActionNode))
+      Branch.get(newActionNode, this)
     } else {
-      null
+      Branch.get(this, newActionNode)
     }
   }
 
@@ -32,7 +30,7 @@ case class ActionNode(action: Action) extends Node {
   }
 
   def consumeParallely(newActionNode: ActionNode): Node = {
-    new ForkJoin(Set(this, newActionNode))
+    ForkJoin.get(this, newActionNode)
   }
 
   override def canExecuteInParallelCompletely(newActionNode: ActionNode): Boolean = {

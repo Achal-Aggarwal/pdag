@@ -12,10 +12,7 @@ case class ForkJoin(nodes: Set[Node]) extends Node {
   }
 
   override def canExecuteInParallelCompletely(newActionNode: ActionNode): Boolean = {
-    val nonParallelBranches: Set[Node] = nodes
-      .filter(!_.canExecuteInParallelCompletely(newActionNode))
-
-    nonParallelBranches.isEmpty
+    !nodes.exists(!_.canExecuteInParallelCompletely(newActionNode))
   }
 
   override def canExecuteInParallelPartially(newActionNode: ActionNode): Boolean = {
@@ -35,25 +32,21 @@ case class ForkJoin(nodes: Set[Node]) extends Node {
     val completelyParallelBranches: Set[Node] = nodes
       .filter(_.canExecuteInParallelCompletely(node))
 
-    val partiallyParallelBranches: Set[Node] = completelyParallelBranches
-      .filter(_.canExecuteInParallelPartially(node))
-
     val completelyNonParallelBranches: Set[Node] = nodes
       .filter(!_.canExecuteInParallelCompletely(node))
-
 
     if (completelyParallelBranches.size == nodes.size) {
       ForkJoin.get(nodes + node)
     } else if(completelyNonParallelBranches.size == 1){
       ForkJoin.get(completelyParallelBranches + completelyNonParallelBranches.head.consume(node))
     } else if (completelyParallelBranches.nonEmpty && completelyNonParallelBranches.forall(_.canExecuteInSerialFirst(node))) {
-      ForkJoin.get(completelyParallelBranches + new Branch(node, new ForkJoin(completelyNonParallelBranches)))
+      ForkJoin.get(completelyParallelBranches + Branch.get(node, ForkJoin.get(completelyNonParallelBranches)))
     } else if (completelyParallelBranches.nonEmpty && completelyNonParallelBranches.forall(_.canExecuteInSerialLast(node))) {
-      ForkJoin.get(completelyParallelBranches + new Branch(new ForkJoin(completelyNonParallelBranches), node))
+      ForkJoin.get(completelyParallelBranches + Branch.get(ForkJoin.get(completelyNonParallelBranches), node))
     } else if(canExecuteInSerialFirst(node)) {
-      new Branch(node, this)
+      Branch.get(node, this)
     } else {
-      new Branch(this, node)
+      Branch.get(this, node)
     }
   }
 
@@ -71,5 +64,9 @@ object ForkJoin {
     } else {
       new ForkJoin(nodes)
     }
+  }
+
+  def get(nodes: Node*):Node = {
+    get(nodes.toSet)
   }
 }
